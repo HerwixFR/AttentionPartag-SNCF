@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<title>Jeu Chemins Complexes</title>
+<style>
+  canvas {
+    background: #fafafa;
+    display: block;
+    margin: 20px auto;
+    border: 2px solid #222;
+  }
+  #score {
+    font-family: Arial, sans-serif;
+    font-size: 20px;
+    margin-left: 20px;
+  }
+</style>
+</head>
+<body>
+
+<div id="score">Score: 100</div>
+<canvas id="gameCanvas" width="900" height="500"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let score = 100;
+const penalty = 10;
+const scoreDiv = document.getElementById('score');
+
+class Node {
+  constructor(id, x, y) {
+    this.id = id;
+    this.x = x;
+    this.y = y;
+    this.edges = [];
+  }
+  addEdge(edge) {
+    this.edges.push(edge);
+  }
+}
+
+class Edge {
+  constructor(fromNode, toNode, hasRedZone = false) {
+    this.from = fromNode;
+    this.to = toNode;
+    this.hasRedZone = hasRedZone;
+    this.redZonePos = 0.6;
+    this.length = Math.hypot(toNode.x - fromNode.x, toNode.y - fromNode.y);
+  }
+}
+
+const nodes = {
+  start: new Node("start", 40, 250),
+  A: new Node("A", 140, 100),
+  B: new Node("B", 140, 400),
+  C: new Node("C", 280, 250),
+  D: new Node("D", 380, 120),
+  E: new Node("E", 380, 400),
+  F: new Node("F", 520, 250),
+  G: new Node("G", 580, 170),
+  H: new Node("H", 580, 330),
+  I: new Node("I", 700, 120),
+  J: new Node("J", 700, 400),
+  K: new Node("K", 800, 250),
+  end: new Node("end", 860, 250)
+};
+
+const edges = [
+  new Edge(nodes.start, nodes.A, false),
+  new Edge(nodes.start, nodes.B, true),
+  new Edge(nodes.A, nodes.D, true),
+  new Edge(nodes.A, nodes.C, false),
+  new Edge(nodes.B, nodes.E, false),
+  new Edge(nodes.B, nodes.C, true),
+  new Edge(nodes.C, nodes.F, false),
+  new Edge(nodes.D, nodes.I, true),
+  new Edge(nodes.E, nodes.J, true),
+  new Edge(nodes.F, nodes.G, false),
+  new Edge(nodes.F, nodes.H, true),
+  new Edge(nodes.G, nodes.I, false),
+  new Edge(nodes.H, nodes.J, false),
+  new Edge(nodes.I, nodes.K, false),
+  new Edge(nodes.J, nodes.K, false),
+  new Edge(nodes.K, nodes.end, false)
+];
+
+edges.forEach(e => e.from.addEdge(e));
+
+function lerp(a,b,t) { return a + (b - a)*t; }
+
+const PIXELS_PER_SECOND = 60;
+
+class Mobile {
+  constructor(id) {
+    this.id = id;
+    this.currentEdge = null;
+    this.t = 0;
+    this.deleted = false;
+    this.passedRedZone = false;
+  }
+
+  startAt(node) {
+    if(node.edges.length === 0) {
+      this.deleted = true;
+      return;
+    }
+    this.currentEdge = node.edges[Math.floor(Math.random() * node.edges.length)];
+    this.t = 0;
+    this.passedRedZone = false;
+  }
+
+  update(deltaTimeSec) {
+    if(this.deleted || !this.currentEdge) return;
+
+    const distance = PIXELS_PER_SECOND * deltaTimeSec;
+    const edgeLength = this.currentEdge.length;
+    const dt = distance / edgeLength;
+    this.t += dt;
+
+    if(this.currentEdge.hasRedZone && !this.passedRedZone && this.t >= this.currentEdge.redZonePos) {
+      this.passedRedZone = true;
+    }
+
+    if(this.t >= 1) {
+      this.startAt(this.currentEdge.to);
+    }
+  }
+
+  getPosition() {
+    if(!this.currentEdge) return {x:0, y:0};
+    const from = this.currentEdge.from;
+    const to = this.currentEdge.to;
+    return {
+      x: lerp(from.x, to.x, this.t),
+      y: lerp(from.y, to.y, this.t)
+    };
+  }
+
+  isAtRedZone() {
+    return this.currentEdge?.hasRedZone && this.t >= this.currentEdge.redZonePos && this.t < this.currentEdge.redZonePos + 0.05;
+  }
+
+  hasPassedRedZone() {
+    return this.passedRedZone && this.t > this.currentEdge.redZonePos + 0.1;
+  }
+}
+
+let mobiles = [];
+let availableIds = [1,2,3,4,5,6,7,8,9];
+
+function createMobile() {
+  if (availableIds.length === 0) return;
+
+  const randIndex = Math.floor(Math.random() * availableIds.length);
+  const id = availableIds.splice(randIndex, 1)[0];
+
+  const mob = new Mobile(id);
+  mob.startAt(nodes.start);
+  mobiles.push(mob);
+}
+
+function recycleMobile(id) {
+  availableIds.push(id);
+  setTimeout(spawnMobileRandomly, 200);
+}
+
+function drawNode(node) {
+  ctx.fillStyle = "black";
+  ctx.beginPath();
+  ctx.arc(node.x, node.y, 8, 0, 2*Math.PI);
+  ctx.fill();
+  ctx.fillStyle = "white";
+  ctx.font = "10px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(node.id, node.x, node.y);
+}
+
+function drawEdge(edge) {
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = "#666";
+  ctx.beginPath();
+  ctx.moveTo(edge.from.x, edge.from.y);
+  ctx.lineTo(edge.to.x, edge.to.y);
+  ctx.stroke();
+
+  if(edge.hasRedZone) {
+    const rx = lerp(edge.from.x, edge.to.x, edge.redZonePos);
+    const ry = lerp(edge.from.y, edge.to.y, edge.redZonePos);
+    ctx.strokeStyle = "red";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(rx, ry-15);
+    ctx.lineTo(rx, ry+15);
+    ctx.stroke();
+  }
+}
+
+function drawMobile(mobile) {
+  if(mobile.deleted) return;
+  const pos = mobile.getPosition();
+  ctx.beginPath();
+  ctx.fillStyle = mobile.isAtRedZone() ? "orange" : "blue";
+  ctx.arc(pos.x, pos.y, 12, 0, 2*Math.PI);
+  ctx.fill();
+  ctx.fillStyle = "white";
+  ctx.font = "14px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(mobile.id, pos.x, pos.y);
+}
+
+function onMobileMissed(mobile) {
+  score -= penalty;
+  if(score < 0) score = 0;
+  scoreDiv.textContent = `Score: ${score}`;
+  console.log(`Mobile ${mobile.id} a dépassé la zone rouge, -${penalty} points`);
+}
+
+let lastTimestamp = null;
+
+function update(timestamp) {
+  if (lastTimestamp === null) lastTimestamp = timestamp;
+  const delta = (timestamp - lastTimestamp) / 1000;
+  lastTimestamp = timestamp;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  edges.forEach(drawEdge);
+  Object.values(nodes).forEach(drawNode);
+
+  mobiles.forEach(mob => {
+    mob.update(delta);
+    if(!mob.deleted && mob.hasPassedRedZone()) {
+      mob.deleted = true;
+      onMobileMissed(mob);
+      recycleMobile(mob.id);
+    }
+  });
+
+  mobiles = mobiles.filter(m => !m.deleted);
+  mobiles.forEach(drawMobile);
+
+  requestAnimationFrame(update);
+}
+
+// ✅ Interception fiable via pavé numérique ou chiffre principal
+window.addEventListener('keydown', (e) => {
+  let key = e.code.startsWith("Numpad") ? e.code.replace("Numpad", "") : e.key;
+  const num = parseInt(key);
+  if (isNaN(num) || num < 1 || num > 9) return;
+
+  const mobile = mobiles.find(m => m.id === num && m.isAtRedZone() && !m.deleted);
+  if (mobile) {
+    mobile.deleted = true;
+    console.log(`Mobile ${mobile.id} intercepté`);
+    recycleMobile(mobile.id);
+  }
+});
+
+// 🕒 Spawning avec délai aléatoire entre 2.5 et 5 sec
+function spawnMobileRandomly() {
+  if (availableIds.length === 0) return;
+  createMobile();
+  const delay = 2500 + Math.random() * 2500; // entre 2.5s et 5s
+  setTimeout(spawnMobileRandomly, delay);
+}
+
+spawnMobileRandomly();
+requestAnimationFrame(update);
+</script>
+
+</body>
+</html>
